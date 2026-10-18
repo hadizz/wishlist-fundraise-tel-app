@@ -8,7 +8,8 @@ import type { BotContext } from "../context";
 import { cb, displayName, esc } from "../render";
 
 /** Commands available in the bot DM. The Mini App does the heavy lifting; these are shortcuts. */
-export const privateCommands = new Composer<BotContext>().chatType("private");
+export const privateCommands = new Composer<BotContext>();
+const cmd = privateCommands.chatType("private");
 
 const openApp = (label: string, param?: string) => new InlineKeyboard().url(label, miniAppLink(param));
 
@@ -18,7 +19,7 @@ const openApp = (label: string, param?: string) => new InlineKeyboard().url(labe
  *   u_<id> / w_<id> / p_<id> / s_<id>  deep link from a shared card -> open app there
  * Starting the bot also enables DMs (users.can_dm), set in bot.ts middleware.
  */
-privateCommands.command("start", async (ctx) => {
+cmd.command("start", async (ctx) => {
   const param = parseStartParam(ctx.match);
   if (param) {
     return ctx.reply("Tap to open:", { reply_markup: openApp("🎁 Open", ctx.match) });
@@ -35,10 +36,10 @@ privateCommands.command("start", async (ctx) => {
   );
 });
 
-privateCommands.command("app", (ctx) => ctx.reply("Your wishlists:", { reply_markup: openApp("🎁 Open app") }));
+cmd.command("app", (ctx) => ctx.reply("Your wishlists:", { reply_markup: openApp("🎁 Open app") }));
 
 /** /mylists — quick text overview with progress. */
-privateCommands.command("mylists", async (ctx) => {
+cmd.command("mylists", async (ctx) => {
   const rows = await db
     .select({
       id: wishlists.id,
@@ -58,7 +59,7 @@ privateCommands.command("mylists", async (ctx) => {
 });
 
 /** /requests — pending follow requests with Accept/Decline buttons. */
-privateCommands.command("requests", async (ctx) => {
+cmd.command("requests", async (ctx) => {
   const rows = await db
     .select({ id: users.id, username: users.username, firstName: users.firstName })
     .from(follows)
@@ -75,7 +76,7 @@ privateCommands.command("requests", async (ctx) => {
 });
 
 /** /pending — manual payment claims awaiting my confirmation. */
-privateCommands.command("pending", async (ctx) => {
+cmd.command("pending", async (ctx) => {
   const rows = await db
     .select({ c: contributions, title: products.title, who: { username: users.username, firstName: users.firstName } })
     .from(contributions)
@@ -85,7 +86,7 @@ privateCommands.command("pending", async (ctx) => {
     .where(and(eq(wishlists.ownerId, ctx.dbUser!.id), eq(contributions.status, "awaiting_confirmation")))
     .limit(20);
   if (rows.length === 0) return ctx.reply("Nothing waiting for your confirmation.");
-  for (const r of rows) await ctx.reply(...manualClaimMessage(r.c.id, displayName(r.who), r.title, formatMoney(r.c.amountMinor, r.c.currency), r.c.message));
+  for (const r of rows) await ctx.reply(...manualClaimMessage(r.c.id, r.c.isAnonymous ? "Someone (anonymous)" : displayName(r.who), r.title, formatMoney(r.c.amountMinor, r.c.currency), r.c.message));
 });
 
 export function manualClaimMessage(id: string, who: string, title: string, amount: string, note: string | null) {
@@ -101,7 +102,7 @@ export function manualClaimMessage(id: string, who: string, title: string, amoun
 }
 
 /** /settings — toggle DM notifications. */
-privateCommands.command("settings", async (ctx) => {
+cmd.command("settings", async (ctx) => {
   const arg = ctx.match.trim().toLowerCase();
   if (arg === "on" || arg === "off") {
     await db.update(users).set({ notificationsEnabled: arg === "on" }).where(eq(users.id, ctx.dbUser!.id));
@@ -113,7 +114,7 @@ privateCommands.command("settings", async (ctx) => {
   );
 });
 
-privateCommands.command("help", (ctx) =>
+cmd.command("help", (ctx) =>
   ctx.reply(
     [
       "/app — open the Mini App",
@@ -129,7 +130,7 @@ privateCommands.command("help", (ctx) =>
   ),
 );
 
-privateCommands.command("terms", (ctx) =>
+cmd.command("terms", (ctx) =>
   ctx.reply(
     "Contributions in Telegram Stars are voluntary gifts toward another user's wish. " +
       "Manual payments happen outside Telegram; we only record them. See the app for full terms.",

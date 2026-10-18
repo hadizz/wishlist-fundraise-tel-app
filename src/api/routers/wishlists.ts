@@ -1,11 +1,12 @@
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { products, wishlists } from "../../db/schema";
+import { assertCanHaveWishlist } from "../../lib/entitlements";
 import { canViewWishlist } from "../../services/access";
 import { authedProcedure, router } from "../trpc";
 import { id, ownedWishlist, readableWishlist } from "./_shared";
 
-const visibility = z.enum(["public", "followers", "private"]);
+const visibility = z.enum(["public", "private"]);
 const fields = {
   title: z.string().trim().min(1).max(120),
   description: z.string().max(2000).nullish(),
@@ -48,9 +49,11 @@ export const wishlistsRouter = router({
     return { wishlist: w, products: items, isOwner };
   }),
 
+  /** Plan limits apply: FORBIDDEN "plan_limit:public_wishlists" / "plan_limit:private_wishlists". */
   create: authedProcedure
-    .input(z.object({ ...fields, visibility: visibility.default("followers") }))
+    .input(z.object({ ...fields, visibility: visibility.default("public") }))
     .mutation(async ({ ctx, input }) => {
+      await assertCanHaveWishlist(ctx.db, ctx.user.id, input.visibility);
       const [w] = await ctx.db
         .insert(wishlists)
         .values({
@@ -65,7 +68,10 @@ export const wishlistsRouter = router({
   update: authedProcedure
     .input(z.object({ wishlistId: id, ...z.object(fields).partial().shape }))
     .mutation(async ({ ctx, input: { wishlistId, ...patch } }) => {
-      await ownedWishlist(ctx.db, ctx.user.id, wishlistId);
+      const current = await ownedWishlist(ctx.db, ctx.user.id, wishlistId);
+      if (patch.visibility && patch.visibility !== current.visibility) {
+        await assertCanHaveWishlist(ctx.db, ctx.user.id, patch.visibility, wishlistId);
+      }
       const [w] = await ctx.db.update(wishlists).set(patch).where(eq(wishlists.id, wishlistId)).returning();
       return w!;
     }),

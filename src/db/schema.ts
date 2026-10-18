@@ -35,7 +35,11 @@ const timestamps = {
 
 // ---------------------------------------------------------------- enums
 
-export const wishlistVisibility = pgEnum("wishlist_visibility", ["public", "followers", "private"]);
+/**
+ * public  -> anyone with the link, and group chats
+ * private -> the owner and followers the owner accepted
+ */
+export const wishlistVisibility = pgEnum("wishlist_visibility", ["public", "private"]);
 export const followStatus = pgEnum("follow_status", ["pending", "accepted", "rejected"]);
 export const productStatus = pgEnum("product_status", ["active", "funded", "purchased", "archived"]);
 export const subscriptionPlan = pgEnum("subscription_plan", ["free", "premium"]);
@@ -72,8 +76,11 @@ export const users = pgTable(
     languageCode: text("language_code"),
     photoUrl: text("photo_url"),
     bio: text("bio"),
-    /** Public profile: follows auto-accept and "public" lists are visible to anyone. */
-    profilePublic: boolean("profile_public").notNull().default(true),
+    /**
+     * Off (default): every follow request waits for approval, because an
+     * accepted follower can see private lists. On: requests auto-accept.
+     */
+    autoAcceptFollows: boolean("auto_accept_follows").notNull().default(false),
     /** True once the user has /start-ed the bot in DM and not blocked it. */
     canDm: boolean("can_dm").notNull().default(false),
     notificationsEnabled: boolean("notifications_enabled").notNull().default(true),
@@ -310,13 +317,11 @@ export const notificationOutbox = pgTable(
 
 // ---------------------------------------------------------------- subscriptions
 
-/** Free tier: 1 public + 1 private wishlist, 5 products each. Premium: unlimited. */
-export const FREE_TIER_LIMITS = {
-  publicWishlists: 1,
-  privateWishlists: 1,
-  productsPerWishlist: 5,
-} as const;
-
+/**
+ * One row per user who ever had premium. No row = free. Limits per plan live
+ * in src/lib/entitlements.ts. The purchase flow (Stars subscription invoice)
+ * is still an open product decision.
+ */
 export const subscriptions = pgTable(
   "subscriptions",
   {
@@ -331,9 +336,7 @@ export const subscriptions = pgTable(
     telegramPaymentChargeId: text("telegram_payment_charge_id"),
     ...timestamps,
   },
-  (t) => [
-    index("subscriptions_user_idx").on(t.userId),
-  ],
+  (t) => [uniqueIndex("subscriptions_tg_charge_uq").on(t.telegramPaymentChargeId)],
 );
 
 // ---------------------------------------------------------------- relations

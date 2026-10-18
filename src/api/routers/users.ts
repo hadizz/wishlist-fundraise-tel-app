@@ -1,6 +1,7 @@
 import { and, count, eq, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { follows, users, wishlists } from "../../db/schema";
+import { PLAN_LIMITS, planOf } from "../../lib/entitlements";
 import { authedProcedure, router } from "../trpc";
 import { currency, id, notFound } from "./_shared";
 
@@ -11,17 +12,30 @@ const publicUser = {
   lastName: users.lastName,
   photoUrl: users.photoUrl,
   bio: users.bio,
-  profilePublic: users.profilePublic,
 };
 
 export const usersRouter = router({
-  me: authedProcedure.query(({ ctx }) => ctx.user),
+  /** Me + plan, so the Mini App can show limits ("1 of 1 public lists used"). */
+  me: authedProcedure.query(async ({ ctx }) => {
+    const plan = await planOf(ctx.db, ctx.user.id);
+    const limits = PLAN_LIMITS[plan];
+    const finite = (n: number) => (n === Infinity ? null : n); // JSON has no Infinity
+    return {
+      user: ctx.user,
+      plan,
+      limits: {
+        publicWishlists: finite(limits.publicWishlists),
+        privateWishlists: finite(limits.privateWishlists),
+        productsPerWishlist: finite(limits.productsPerWishlist),
+      },
+    };
+  }),
 
   updateMe: authedProcedure
     .input(
       z.object({
         bio: z.string().max(500).nullish(),
-        profilePublic: z.boolean().optional(),
+        autoAcceptFollows: z.boolean().optional(),
         notificationsEnabled: z.boolean().optional(),
         defaultCurrency: currency.optional(),
       }),

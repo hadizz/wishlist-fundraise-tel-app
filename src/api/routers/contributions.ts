@@ -151,7 +151,7 @@ export const contributionsRouter = router({
   /**
    * Contribution feed for a product. Everyone sees confirmed ones; the owner
    * also sees awaiting_confirmation. Anonymous contributors are masked for
-   * everyone except themselves (including the owner).
+   * everyone except themselves, the owner included.
    */
   listForProduct: authedProcedure
     .input(page.extend({ productId: id }))
@@ -186,13 +186,18 @@ export const contributionsRouter = router({
     return { items, nextCursor: rows.length > input.limit ? items.at(-1)!.c.createdAt.toISOString() : null };
   }),
 
-  /** Manual claims waiting for my decision (badge count in the Mini App). */
-  awaitingMyDecision: authedProcedure.query(({ ctx }) =>
-    ctx.db.select({ ...contributorView, productTitle: products.title }).from(contributions)
+  /**
+   * Manual claims waiting for my decision (badge count in the Mini App).
+   * Anonymous claims stay masked even here: the owner verifies by amount,
+   * date and note. The contributor id is kept in the DB for audit only.
+   */
+  awaitingMyDecision: authedProcedure.query(async ({ ctx }) => {
+    const rows = await ctx.db.select({ ...contributorView, productTitle: products.title }).from(contributions)
       .innerJoin(products, eq(products.id, contributions.productId))
       .innerJoin(wishlists, eq(wishlists.id, products.wishlistId))
       .innerJoin(users, eq(users.id, contributions.contributorId))
       .where(and(eq(wishlists.ownerId, ctx.user.id), eq(contributions.status, "awaiting_confirmation")))
-      .orderBy(desc(contributions.createdAt)),
-  ),
+      .orderBy(desc(contributions.createdAt));
+    return rows.map((r) => (r.isAnonymous ? { ...r, contributor: null } : r));
+  }),
 });

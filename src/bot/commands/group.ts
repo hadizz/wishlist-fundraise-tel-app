@@ -9,10 +9,11 @@ import { sendSessionInvoice } from "../handlers/payments";
 
 /**
  * Group-chat commands. All require the bot to be a member of a group or
- * supergroup. Group chats see only "public" wishlists of public profiles
- * (there is no single viewer identity to check follower access against).
+ * supergroup. Group chats see only "public" wishlists (there is no single
+ * viewer identity to check follower access against).
  */
-export const groupCommands = new Composer<BotContext>().chatType(["group", "supergroup"]);
+export const groupCommands = new Composer<BotContext>();
+const cmd = groupCommands.chatType(["group", "supergroup"]);
 
 const MAX_CANDIDATES = 10;
 
@@ -55,7 +56,7 @@ export async function canManageSession(ctx: BotContext, s: GroupSession): Promis
  *   no n -> list the person's public items and open a vote
  *   n    -> start collecting for item n immediately
  */
-groupCommands.command("fundraise", async (ctx) => {
+cmd.command("fundraise", async (ctx) => {
   await upsertChat(ctx);
   const [handle, nRaw] = ctx.match.trim().split(/\s+/);
   const username = handle?.replace(/^@/, "");
@@ -75,20 +76,18 @@ groupCommands.command("fundraise", async (ctx) => {
   }
   if (beneficiary.id === ctx.dbUser?.id) return ctx.reply("You can't start a group gift for yourself 🙂");
 
-  const items = beneficiary.profilePublic
-    ? await db
-        .select({ id: products.id })
-        .from(products)
-        .innerJoin(wishlists, eq(wishlists.id, products.wishlistId))
-        .where(and(
-          eq(wishlists.ownerId, beneficiary.id),
-          eq(wishlists.visibility, "public"),
-          sql`${wishlists.archivedAt} is null`,
-          eq(products.status, "active"),
-        ))
-        .orderBy(asc(wishlists.position), sql`${products.priority} desc`, asc(products.position))
-        .limit(MAX_CANDIDATES)
-    : [];
+  const items = await db
+    .select({ id: products.id })
+    .from(products)
+    .innerJoin(wishlists, eq(wishlists.id, products.wishlistId))
+    .where(and(
+      eq(wishlists.ownerId, beneficiary.id),
+      eq(wishlists.visibility, "public"),
+      sql`${wishlists.archivedAt} is null`,
+      eq(products.status, "active"),
+    ))
+    .orderBy(asc(wishlists.position), sql`${products.priority} desc`, asc(products.position))
+    .limit(MAX_CANDIDATES);
   if (items.length === 0) {
     return ctx.reply(`@${username} has no public wishes collecting right now.`);
   }
@@ -114,14 +113,14 @@ groupCommands.command("fundraise", async (ctx) => {
 });
 
 /** /status — re-post the live progress/vote message (old one may be far up the chat). */
-groupCommands.command("status", async (ctx) => {
+cmd.command("status", async (ctx) => {
   const s = await activeSession(ctx.chat.id);
   if (!s) return ctx.reply("No active group gift. Start one with /fundraise @username");
   await postSessionMessage(ctx, s.id);
 });
 
 /** /contribute <stars> — sends a Stars invoice for the open session. */
-groupCommands.command("contribute", async (ctx) => {
+cmd.command("contribute", async (ctx) => {
   const s = await activeSession(ctx.chat.id);
   if (!s || s.status !== "open") return ctx.reply("No group gift is collecting right now.");
   const stars = Number(ctx.match.trim());
@@ -132,7 +131,7 @@ groupCommands.command("contribute", async (ctx) => {
 });
 
 /** /close — stop collecting (creator or admin). Confirmed money stays credited to the product. */
-groupCommands.command(["close", "cancel"], async (ctx) => {
+cmd.command(["close", "cancel"], async (ctx) => {
   const s = await activeSession(ctx.chat.id);
   if (!s) return ctx.reply("No active group gift.");
   if (!(await canManageSession(ctx, s))) return ctx.reply("Only the person who started it or a chat admin can close it.");
@@ -147,7 +146,7 @@ export async function closeSession(s: GroupSession) {
     .where(and(eq(groupSessions.id, s.id), inArray(groupSessions.status, ["voting", "open"])));
 }
 
-groupCommands.command("help", (ctx) =>
+cmd.command("help", (ctx) =>
   ctx.reply(
     [
       "🎁 <b>Group gifts</b>",

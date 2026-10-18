@@ -1,18 +1,16 @@
 import { and, eq } from "drizzle-orm";
 import type { Executor } from "../db/client";
-import { follows, users, type Wishlist } from "../db/schema";
+import { follows, type Wishlist } from "../db/schema";
 
 /**
  * Visibility rules (single place, used by API and bot):
  *
  *  - owner sees everything
- *  - "private"   -> owner only
- *  - "followers" -> accepted followers
- *  - "public"    -> anyone, UNLESS the owner's profile is private, in which
- *                   case it behaves like "followers"
+ *  - "public"  -> anyone
+ *  - "private" -> followers the owner accepted
+ *  - archived  -> owner only
  *
- * Group chats have no viewer identity: they only ever see "public" lists of
- * public profiles (see wishlistsVisibleInGroup).
+ * Group chats have no viewer identity, so they only ever see "public" lists.
  */
 export async function isAcceptedFollower(db: Executor, viewerId: string, ownerId: string) {
   const [row] = await db
@@ -28,10 +26,7 @@ export async function canViewWishlist(
   list: Pick<Wishlist, "ownerId" | "visibility" | "archivedAt">,
 ): Promise<boolean> {
   if (viewerId === list.ownerId) return true;
-  if (list.archivedAt || list.visibility === "private") return false;
-  if (list.visibility === "public") {
-    const [owner] = await db.select({ p: users.profilePublic }).from(users).where(eq(users.id, list.ownerId));
-    if (owner?.p) return true;
-  }
+  if (list.archivedAt) return false;
+  if (list.visibility === "public") return true;
   return viewerId !== null && isAcceptedFollower(db, viewerId, list.ownerId);
 }

@@ -1,11 +1,10 @@
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { contributions, groupSessions, products } from "../../db/schema";
 import { env } from "../../env";
-import { rateLimit } from "../../lib/redis";
 import { ALLOWED_IMAGE_TYPES, presignImageUpload } from "../../lib/storage";
-import { ScrapeError, scrapeProduct } from "../../services/scraper";
+import { assertCanAddProduct } from "../../lib/entitlements";
 import { authedProcedure, router } from "../trpc";
 import { currency, httpUrl, id, money, ownedProduct, ownedWishlist, readableProduct } from "./_shared";
 
@@ -44,10 +43,12 @@ export const productsRouter = router({
     };
   }),
 
+  /** Manual entry only (no URL scraping in v1). Plan limit: FORBIDDEN "plan_limit:products_per_wishlist". */
   create: authedProcedure
-    .input(z.object({ wishlistId: id, source: z.enum(["manual", "scraped"]).default("manual"), ...fields }))
+    .input(z.object({ wishlistId: id, ...fields }))
     .mutation(async ({ ctx, input }) => {
       await ownedWishlist(ctx.db, ctx.user.id, input.wishlistId);
+      await assertCanAddProduct(ctx.db, ctx.user.id, input.wishlistId);
       if (input.currency !== "XTR" && !env.STARS_RATES[input.currency]) {
         throw new TRPCError({ code: "BAD_REQUEST", message: `currency ${input.currency} is not supported` });
       }
@@ -83,6 +84,9 @@ export const productsRouter = router({
     .input(z.object({ productId: id, status: z.enum(["purchased", "archived", "active"]) }))
     .mutation(async ({ ctx, input }) => {
       const { product } = await ownedProduct(ctx.db, ctx.user.id, input.productId);
+      if (product.status === "archived" && input.status !== "archived") {
+        await assertCanAddProduct(ctx.db, ctx.user.id, product.wishlistId);
+      }
       const status = input.status === "active" && product.fundedMinor >= product.priceMinor ? "funded" : input.status;
       const [p] = await ctx.db.transaction(async (tx) => {
         if (status !== "active" && status !== "funded") {
@@ -119,17 +123,6 @@ export const productsRouter = router({
       return { ok: true };
     }),
 
-  /** Prefill from a shop URL. Partial results are normal; UI falls back to manual fields. */
-  scrape: authedProcedure.input(z.object({ url: httpUrl })).mutation(async ({ ctx, input }) => {
-    if (!(await rateLimit(`scrape:${ctx.user.id}`, 10))) throw new TRPCError({ code: "TOO_MANY_REQUESTS" });
-    try {
-      return await scrapeProduct(input.url);
-    } catch (e) {
-      if (e instanceof ScrapeError) throw new TRPCError({ code: "UNPROCESSABLE_CONTENT", message: e.message });
-      throw e;
-    }
-  }),
-
   /** Presigned PUT for a product image; client uploads directly, then sends publicUrl as imageUrl. */
   presignImage: authedProcedure
     .input(z.object({ contentType: z.enum(ALLOWED_IMAGE_TYPES), contentLength: z.number().int().positive().max(env.UPLOAD_MAX_BYTES) }))
@@ -141,7 +134,7 @@ export const productsRouter = router({
       select p.*, w.owner_id from products p
       join wishlists w on w.id = p.wishlist_id
       join follows f on f.followee_id = w.owner_id and f.follower_id = ${ctx.user.id} and f.status = 'accepted'
-      where p.status = 'funded' and w.visibility <> 'private' and w.archived_at is null
+      where p.status = 'funded' and w.archived_at is null
       order by p.funded_at desc limit 30`),
   ),
 });

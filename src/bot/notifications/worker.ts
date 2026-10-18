@@ -98,7 +98,8 @@ async function renderDm(row: Row): Promise<Send | { raw: ReturnType<typeof manua
     case "manual_claim": {
       const r = await contributionInfo(p.contributionId!);
       if (!r || r.c.status !== "awaiting_confirmation") return null;
-      return { raw: manualClaimMessage(r.c.id, displayName(r.who), r.product.title, formatMoney(r.c.amountMinor, r.c.currency), r.c.message) };
+      const who = r.c.isAnonymous ? "Someone (anonymous)" : displayName(r.who);
+      return { raw: manualClaimMessage(r.c.id, who, r.product.title, formatMoney(r.c.amountMinor, r.c.currency), r.c.message) };
     }
     case "manual_decided": {
       const r = await contributionInfo(p.contributionId!);

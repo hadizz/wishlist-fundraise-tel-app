@@ -17,9 +17,9 @@ const person = {
 
 export const followsRouter = router({
   /**
-   * Public profile -> accepted immediately. Private profile -> pending, owner
-   * gets a DM with Accept/Decline. Re-requesting after a rejection is
-   * silently kept "rejected" (no spam), but the caller sees "pending".
+   * Pending by default; the owner gets a DM with Accept/Decline. Accepted
+   * at once if the owner turned on autoAcceptFollows. A rejected request
+   * stays "rejected" (no repeat DMs), but the caller sees "pending".
    */
   follow: authedProcedure.input(z.object({ userId: id })).mutation(async ({ ctx, input }) => {
     if (input.userId === ctx.user.id) throw new TRPCError({ code: "BAD_REQUEST", message: "cannot follow yourself" });
@@ -33,7 +33,7 @@ export const followsRouter = router({
       if (existing?.status === "rejected") return { status: "pending" as const };
       if (existing?.status === "pending") return { status: "pending" as const };
 
-      const status = target.profilePublic ? "accepted" : "pending";
+      const status = target.autoAcceptFollows ? "accepted" : "pending";
       await tx.insert(follows).values({
         followerId: ctx.user.id,
         followeeId: target.id,
@@ -70,17 +70,18 @@ export const followsRouter = router({
       .orderBy(desc(follows.createdAt)),
   ),
 
-  followers: authedProcedure.input(z.object({ userId: id.optional() }).default({})).query(({ ctx, input }) =>
+  /** My followers / who I follow. Other users' graphs are not exposed (counts only, via users.profile). */
+  followers: authedProcedure.query(({ ctx }) =>
     ctx.db.select(person).from(follows)
       .innerJoin(users, eq(users.id, follows.followerId))
-      .where(and(eq(follows.followeeId, input.userId ?? ctx.user.id), eq(follows.status, "accepted")))
+      .where(and(eq(follows.followeeId, ctx.user.id), eq(follows.status, "accepted")))
       .orderBy(desc(follows.respondedAt)),
   ),
 
-  following: authedProcedure.input(z.object({ userId: id.optional() }).default({})).query(({ ctx, input }) =>
+  following: authedProcedure.query(({ ctx }) =>
     ctx.db.select(person).from(follows)
       .innerJoin(users, eq(users.id, follows.followeeId))
-      .where(and(eq(follows.followerId, input.userId ?? ctx.user.id), eq(follows.status, "accepted")))
+      .where(and(eq(follows.followerId, ctx.user.id), eq(follows.status, "accepted")))
       .orderBy(desc(follows.respondedAt)),
   ),
 });
