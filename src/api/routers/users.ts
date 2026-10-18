@@ -1,0 +1,77 @@
+import { and, count, eq, ilike, or, sql } from "drizzle-orm";
+import { z } from "zod";
+import { follows, users, wishlists } from "../../db/schema";
+import { authedProcedure, router } from "../trpc";
+import { currency, id, notFound } from "./_shared";
+
+const publicUser = {
+  id: users.id,
+  username: users.username,
+  firstName: users.firstName,
+  lastName: users.lastName,
+  photoUrl: users.photoUrl,
+  bio: users.bio,
+  profilePublic: users.profilePublic,
+};
+
+export const usersRouter = router({
+  me: authedProcedure.query(({ ctx }) => ctx.user),
+
+  updateMe: authedProcedure
+    .input(
+      z.object({
+        bio: z.string().max(500).nullish(),
+        profilePublic: z.boolean().optional(),
+        notificationsEnabled: z.boolean().optional(),
+        defaultCurrency: currency.optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const [u] = await ctx.db.update(users).set(input).where(eq(users.id, ctx.user.id)).returning();
+      return u!;
+    }),
+
+  /** Profile card + relationship to viewer. */
+  profile: authedProcedure
+    .input(z.union([z.object({ userId: id }), z.object({ username: z.string().min(1).max(32) })]))
+    .query(async ({ ctx, input }) => {
+      const where =
+        "userId" in input
+          ? eq(users.id, input.userId)
+          : sql`lower(${users.username}) = lower(${input.username.replace(/^@/, "")})`;
+      const [u] = await ctx.db.select(publicUser).from(users).where(where);
+      if (!u) throw notFound("user");
+
+      const [[outgoing], [incoming], [followers], [following], [lists]] = await Promise.all([
+        ctx.db.select({ s: follows.status }).from(follows)
+          .where(and(eq(follows.followerId, ctx.user.id), eq(follows.followeeId, u.id))),
+        ctx.db.select({ s: follows.status }).from(follows)
+          .where(and(eq(follows.followerId, u.id), eq(follows.followeeId, ctx.user.id))),
+        ctx.db.select({ n: count() }).from(follows)
+          .where(and(eq(follows.followeeId, u.id), eq(follows.status, "accepted"))),
+        ctx.db.select({ n: count() }).from(follows)
+          .where(and(eq(follows.followerId, u.id), eq(follows.status, "accepted"))),
+        ctx.db.select({ n: count() }).from(wishlists)
+          .where(and(eq(wishlists.ownerId, u.id), sql`${wishlists.archivedAt} is null`)),
+      ]);
+      return {
+        user: u,
+        isMe: u.id === ctx.user.id,
+        followStatus: outgoing?.s ?? null, // viewer -> user
+        followsMe: incoming?.s === "accepted",
+        counts: { followers: followers?.n ?? 0, following: following?.n ?? 0, wishlists: lists?.n ?? 0 },
+      };
+    }),
+
+  /** Username / first-name prefix search. Returns profile cards only; list access is still checked per list. */
+  search: authedProcedure
+    .input(z.object({ query: z.string().trim().min(2).max(32), limit: z.number().int().max(30).default(15) }))
+    .query(({ ctx, input }) => {
+      const q = `${input.query.replace(/^@/, "").replace(/[%_\\]/g, "\\$&")}%`;
+      return ctx.db
+        .select(publicUser)
+        .from(users)
+        .where(and(or(ilike(users.username, q), ilike(users.firstName, q)), sql`${users.id} <> ${ctx.user.id}`))
+        .limit(input.limit);
+    }),
+});
