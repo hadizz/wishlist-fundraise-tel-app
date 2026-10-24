@@ -19,7 +19,7 @@ VITE_API_URL=http://localhost:8080 npm run dev
 
 Use `--include=dev` when `NODE_ENV=production`. It installs the TypeScript and Vite packages. Without it, `npm ci` installs the runtime packages only and the build stops at the `vite/client` types.
 
-`node scripts/check-boundary.mjs` builds each probe import and fails if server code reaches the bundle. It also fails if `@trpc/server` is blocked, because the client type imports that package.
+`node scripts/check-boundary.mjs` builds each probe import against the real files under the repository-root `src/`. A probe passes only when the build fails with the gate's own diagnostic, so an unrelated build error cannot hide a leak. A control proves that `@trpc/server` still builds, because the client type imports that package.
 
 The API must allow the client origin through `CORS_ORIGINS`. Production requires an HTTPS client URL configured in BotFather and `MINI_APP_URL`, plus the existing backend configuration.
 

@@ -46,7 +46,7 @@ function Profile({ userId }: { userId: string }) {
   const unfollow = useAction(() => api.follows.unfollow.mutate({ userId }));
   if (!profile.data) return <><Notice error={profile.error} /><p role="status">{profile.isPending ? "Loading profile…" : "Profile unavailable."}</p></>;
   const p = profile.data;
-  return <><section className="hero"><span className="eyebrow">A little inspiration</span><h1>{p.user.firstName}'s wishes</h1><p>{p.user.bio || "Good things are better together."}</p><span>{p.counts.followers} followers · {p.counts.wishlists} wishlists</span>{!p.isMe && <button disabled={request.isPending || unfollow.isPending} onClick={() => (p.followStatus === "pending" ? unfollow : request).mutate()}>{p.followStatus === "accepted" ? "Unfollow" : p.followStatus === "pending" ? "Cancel follow request" : "Request to follow"}</button>}<Notice error={request.error || unfollow.error} /></section><Lists userId={userId} /></>;
+  return <><section className="hero"><span className="eyebrow">A little inspiration</span><h1>{p.user.firstName}'s wishes</h1><p>{p.user.bio || "Good things are better together."}</p><span>{p.counts.followers} followers · {p.counts.wishlists} wishlists</span>{!p.isMe && <button disabled={request.isPending || unfollow.isPending} onClick={() => (p.followStatus === "pending" || p.followStatus === "accepted" ? unfollow : request).mutate()}>{p.followStatus === "accepted" ? "Unfollow" : p.followStatus === "pending" ? "Cancel follow request" : "Request to follow"}</button>}<Notice error={request.error || unfollow.error} /></section><Lists userId={userId} /></>;
 }
 
 function Wishlist({ wishlistId }: { wishlistId: string }) {
