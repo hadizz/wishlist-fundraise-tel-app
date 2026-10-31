@@ -40,13 +40,21 @@ function Lists({ userId }: { userId?: string }) {
   </section>;
 }
 
+/** Pending and rejected share one control. Unfollow keeps a rejected row, so the click cannot send a second request. */
+function followControl(status: string | null | undefined) {
+  if (status === "accepted") return { label: "Unfollow", action: "unfollow" as const };
+  if (status === "pending" || status === "rejected") return { label: "Cancel follow request", action: "unfollow" as const };
+  return { label: "Request to follow", action: "request" as const };
+}
+
 function Profile({ userId }: { userId: string }) {
   const profile = useQuery({ queryKey: ["profile", userId], queryFn: () => api.users.profile.query({ userId }) });
   const request = useAction(() => api.follows.follow.mutate({ userId }));
   const unfollow = useAction(() => api.follows.unfollow.mutate({ userId }));
   if (!profile.data) return <><Notice error={profile.error} /><p role="status">{profile.isPending ? "Loading profile…" : "Profile unavailable."}</p></>;
   const p = profile.data;
-  return <><section className="hero"><span className="eyebrow">A little inspiration</span><h1>{p.user.firstName}'s wishes</h1><p>{p.user.bio || "Good things are better together."}</p><span>{p.counts.followers} followers · {p.counts.wishlists} wishlists</span>{!p.isMe && <button disabled={request.isPending || unfollow.isPending} onClick={() => (p.followStatus === "pending" || p.followStatus === "accepted" ? unfollow : request).mutate()}>{p.followStatus === "accepted" ? "Unfollow" : p.followStatus === "pending" ? "Cancel follow request" : "Request to follow"}</button>}<Notice error={request.error || unfollow.error} /></section><Lists userId={userId} /></>;
+  const follow = followControl(p.followStatus);
+  return <><section className="hero"><span className="eyebrow">A little inspiration</span><h1>{p.user.firstName}'s wishes</h1><p>{p.user.bio || "Good things are better together."}</p><span>{p.counts.followers} followers · {p.counts.wishlists} wishlists</span>{!p.isMe && <button disabled={request.isPending || unfollow.isPending} onClick={() => (follow.action === "unfollow" ? unfollow : request).mutate()}>{follow.label}</button>}<Notice error={request.error || unfollow.error} /></section><Lists userId={userId} /></>;
 }
 
 function Wishlist({ wishlistId }: { wishlistId: string }) {
